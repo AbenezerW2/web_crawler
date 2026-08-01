@@ -7,6 +7,8 @@ from crawler import (
     extract,
     looks_like_verification_page,
     named_output_path,
+    render_markdown,
+    render_text,
     robots_allows,
     validate_public_url,
 )
@@ -51,6 +53,12 @@ class ExtractTests(unittest.TestCase):
         path = named_output_path("week-1.json", "study")
         self.assertEqual(str(path), "study/week-1.json")
 
+    def test_named_output_uses_format_extension(self):
+        self.assertEqual(
+            str(named_output_path("PHL 218 - Chapter 7.json", "outputs", "markdown")),
+            "outputs/PHL_218_-_Chapter_7.md",
+        )
+
     def test_rejects_empty_named_output(self):
         with self.assertRaises(CrawlerError):
             named_output_path("...", "outputs")
@@ -74,6 +82,33 @@ class ExtractTests(unittest.TestCase):
             "<title>Chapter 7</title><h1>Ethics and care</h1>",
         )
         self.assertFalse(looks_like_verification_page(page))
+
+    def test_accepts_real_page_after_initial_405(self):
+        page = Page(
+            "https://example.com",
+            "https://example.com/chapter",
+            405,
+            "text/html (rendered)",
+            "<title>Chapter 7</title><h1>Ethics and care</h1><p>Study content</p>",
+        )
+        self.assertFalse(looks_like_verification_page(page))
+
+    def test_renders_study_formats(self):
+        data = {
+            "title": "Chapter 7",
+            "final_url": "https://example.com/ch7",
+            "content_blocks": [
+                {"type": "heading", "level": 2, "text": "Key Terms"},
+                {"type": "paragraph", "text": "A useful definition."},
+                {"type": "list_item", "text": "First consideration"},
+            ],
+        }
+        markdown = render_markdown(data)
+        text = render_text(data)
+        self.assertIn("### Key Terms", markdown)
+        self.assertIn("- First consideration", markdown)
+        self.assertIn("KEY TERMS", text)
+        self.assertIn("A useful definition.", text)
 
 
 if __name__ == "__main__":

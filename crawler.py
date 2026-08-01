@@ -139,7 +139,11 @@ def looks_like_verification_page(page: Page) -> bool:
         "checking your browser",
         "captcha",
     )
-    return page.status_code in {401, 403, 405, 429} or any(signal in combined for signal in signals)
+    # In manual Playwright mode, ``status_code`` belongs to the initial
+    # navigation response. It can remain 405 even after the user completes a
+    # challenge and the browser navigates to the real page, so detection must
+    # be based on the current rendered content rather than that stale status.
+    return any(signal in combined for signal in signals)
 
 
 def fetch_playwright(
@@ -188,13 +192,18 @@ def clean_text(value: str) -> str:
     return " ".join(value.split())
 
 
-def named_output_path(name: str, output_dir: str) -> Path:
+def named_output_path(name: str, output_dir: str, output_format: str = "json") -> Path:
     """Return a filesystem-safe JSON path for a user-friendly study name."""
     filename = re.sub(r"[^\w.-]+", "_", name.strip(), flags=re.UNICODE).strip("._")
     if not filename:
         raise CrawlerError("Output name must contain at least one letter or number")
-    if not filename.lower().endswith(".json"):
-        filename += ".json"
+    extensions = {"json": ".json", "markdown": ".md", "text": ".txt"}
+    extension = extensions[output_format]
+    for known_extension in extensions.values():
+        if filename.lower().endswith(known_extension):
+            filename = filename[: -len(known_extension)]
+            break
+    filename += extension
     return Path(output_dir).expanduser() / filename
 
 
@@ -226,6 +235,28 @@ def extract(page: Page) -> dict[str, Any]:
                 rows.append(cells)
         tables.append(rows)
 
+    content_root = soup.find("main") or soup.find("article") or soup.body or soup
+    content_blocks = []
+    block_names = ["h1", "h2", "h3", "h4", "h5", "h6", "p", "li", "blockquote", "pre"]
+    for tag in content_root.find_all(block_names):
+        if tag.find_parent(["nav", "header", "footer", "aside"]):
+            continue
+        if tag.name == "p" and tag.find_parent(["li", "blockquote"]):
+            continue
+        value = clean_text(tag.get_text(" ", strip=True))
+        if not value:
+            continue
+        if tag.name.startswith("h"):
+            content_blocks.append({"type": "heading", "level": int(tag.name[1]), "text": value})
+        elif tag.name == "li":
+            content_blocks.append({"type": "list_item", "text": value})
+        elif tag.name == "blockquote":
+            content_blocks.append({"type": "quote", "text": value})
+        elif tag.name == "pre":
+            content_blocks.append({"type": "preformatted", "text": tag.get_text("\n", strip=True)})
+        else:
+            content_blocks.append({"type": "paragraph", "text": value})
+
     return {
         "requested_url": page.requested_url,
         "final_url": page.final_url,
@@ -238,8 +269,45 @@ def extract(page: Page) -> dict[str, Any]:
         "links": links,
         "images": images,
         "tables": tables,
+        "content_blocks": content_blocks,
         "text": clean_text(soup.get_text(" ", strip=True)),
     }
+
+
+def render_markdown(data: dict[str, Any]) -> str:
+    lines = [f"# {data.get('title') or 'Extracted page'}", "", f"Source: {data['final_url']}", ""]
+    blocks = data.get("content_blocks", [])
+    if not blocks:
+        lines.extend([data.get("text", ""), ""])
+    for block in blocks:
+        kind, value = block["type"], block["text"]
+        if kind == "heading":
+            lines.extend([f"{'#' * min(block['level'] + 1, 6)} {value}", ""])
+        elif kind == "list_item":
+            lines.append(f"- {value}")
+        elif kind == "quote":
+            lines.extend([f"> {value}", ""])
+        elif kind == "preformatted":
+            lines.extend(["```", value, "```", ""])
+        else:
+            lines.extend([value, ""])
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def render_text(data: dict[str, Any]) -> str:
+    lines = [data.get("title") or "Extracted page", f"Source: {data['final_url']}", ""]
+    blocks = data.get("content_blocks", [])
+    if not blocks:
+        lines.append(data.get("text", ""))
+    for block in blocks:
+        value = block["text"]
+        if block["type"] == "heading":
+            lines.extend([value.upper(), ""])
+        elif block["type"] == "list_item":
+            lines.append(f"- {value}")
+        else:
+            lines.extend([value, ""])
+    return "\n".join(lines).rstrip() + "\n"
 
 
 def main() -> int:
@@ -247,7 +315,13 @@ def main() -> int:
     parser.add_argument("url")
     destination = parser.add_mutually_exclusive_group()
     destination.add_argument("-o", "--output", help="Write JSON to this exact file path")
-    destination.add_argument("-n", "--name", help="Name this study output; saves it as JSON in --output-dir")
+    destination.add_argument("-n", "--name", help="Name this study output; saves it in --output-dir")
+    parser.add_argument(
+        "--format",
+        choices=("json", "markdown", "text"),
+        default="json",
+        help="Output format (default: json)",
+    )
     parser.add_argument("--output-dir", default="outputs", help="Folder for --name outputs (default: outputs)")
     parser.add_argument("--overwrite", action="store_true", help="Allow replacing an existing named output")
     parser.add_argument("--playwright", action="store_true", help="Render JavaScript before extraction")
@@ -274,17 +348,23 @@ def main() -> int:
             page = fetch_playwright(args.url, args.timeout, args.max_bytes, args.headed, args.wait_for_user)
         else:
             page = fetch_requests(args.url, args.timeout, args.max_bytes)
-        result = json.dumps(extract(page), ensure_ascii=False, indent=2)
-        output_path = named_output_path(args.name, args.output_dir) if args.name else Path(args.output).expanduser() if args.output else None
+        data = extract(page)
+        if args.format == "markdown":
+            result = render_markdown(data)
+        elif args.format == "text":
+            result = render_text(data)
+        else:
+            result = json.dumps(data, ensure_ascii=False, indent=2) + "\n"
+        output_path = named_output_path(args.name, args.output_dir, args.format) if args.name else Path(args.output).expanduser() if args.output else None
         if output_path:
             if args.name and output_path.exists() and not args.overwrite:
                 raise CrawlerError(f"Output already exists: {output_path} (use --overwrite to replace it)")
             output_path.parent.mkdir(parents=True, exist_ok=True)
             with output_path.open("w", encoding="utf-8") as handle:
-                handle.write(result + "\n")
+                handle.write(result)
             print(f"saved: {output_path.resolve()}")
         else:
-            print(result)
+            print(result, end="")
         return 0
     except (CrawlerError, OSError, requests.RequestException) as exc:
         print(f"error: {exc}", file=sys.stderr)

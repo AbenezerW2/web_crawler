@@ -42,6 +42,20 @@ an existing named extraction:
 python crawler.py "https://example.com/chapter-7" --name "PHL 218 - Chapter 7" --output-dir study-data --overwrite
 ```
 
+Choose a study-friendly format with `--format`. Markdown preserves headings,
+paragraphs, lists, and quotations and is recommended for NotebookLM and LLMs:
+
+```bash
+python crawler.py "https://example.com/chapter-7" --name "PHL 218 - Chapter 7" --format markdown
+```
+
+Named outputs automatically receive `.json`, `.md`, or `.txt` extensions:
+
+```bash
+python crawler.py "https://example.com/chapter-7" --name "PHL 218 - Chapter 7" --format text
+python crawler.py "https://example.com/chapter-7" --name "PHL 218 - Chapter 7" --format json
+```
+
 Useful controls:
 
 ```bash
