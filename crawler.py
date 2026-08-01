@@ -6,10 +6,12 @@ from __future__ import annotations
 import argparse
 import ipaddress
 import json
+import re
 import socket
 import sys
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 from urllib.parse import urljoin, urlparse
 from urllib.robotparser import RobotFileParser
@@ -124,7 +126,29 @@ def fetch_requests(url: str, timeout: float, max_bytes: int) -> Page:
     raise CrawlerError(f"Too many redirects (maximum {MAX_REDIRECTS})")
 
 
-def fetch_playwright(url: str, timeout: float, max_bytes: int) -> Page:
+def looks_like_verification_page(page: Page) -> bool:
+    soup = BeautifulSoup(page.html, "html.parser")
+    title = clean_text(soup.title.get_text()) if soup.title else ""
+    text = clean_text(soup.get_text(" ", strip=True))[:5000]
+    combined = f"{title} {text}".lower()
+    signals = (
+        "human verification",
+        "confirm you are human",
+        "verify you are human",
+        "security check before continuing",
+        "checking your browser",
+        "captcha",
+    )
+    return page.status_code in {401, 403, 405, 429} or any(signal in combined for signal in signals)
+
+
+def fetch_playwright(
+    url: str,
+    timeout: float,
+    max_bytes: int,
+    headed: bool = False,
+    wait_for_user: bool = False,
+) -> Page:
     validate_public_url(url)
     if not robots_allows(url, timeout):
         raise CrawlerError("robots.txt does not allow this URL for this crawler")
@@ -134,23 +158,44 @@ def fetch_playwright(url: str, timeout: float, max_bytes: int) -> Page:
         raise CrawlerError("Playwright is not installed; see README.md") from exc
 
     with sync_playwright() as playwright:
-        browser = playwright.chromium.launch(headless=True)
+        browser = playwright.chromium.launch(headless=not headed)
         context = browser.new_context(user_agent=USER_AGENT)
         page = context.new_page()
         try:
             response = page.goto(url, wait_until="networkidle", timeout=int(timeout * 1000))
+            if wait_for_user:
+                print(
+                    "Complete any verification in the browser window, then return here and press Enter...",
+                    file=sys.stderr,
+                )
+                input()
+                page.wait_for_timeout(1000)
             final_url = page.url
             validate_public_url(final_url)
             html = page.content()
             if len(html.encode("utf-8")) > max_bytes:
                 raise CrawlerError(f"Rendered page exceeded the {max_bytes:,}-byte limit")
-            return Page(url, final_url, response.status if response else 0, "text/html (rendered)", html)
+            rendered = Page(url, final_url, response.status if response else 0, "text/html (rendered)", html)
+            if looks_like_verification_page(rendered):
+                hint = " Try --playwright --headed --wait-for-user to complete it manually." if not wait_for_user else " The verification was still present after the manual wait."
+                raise CrawlerError("The site returned a human-verification page instead of the requested content." + hint)
+            return rendered
         finally:
             browser.close()
 
 
 def clean_text(value: str) -> str:
     return " ".join(value.split())
+
+
+def named_output_path(name: str, output_dir: str) -> Path:
+    """Return a filesystem-safe JSON path for a user-friendly study name."""
+    filename = re.sub(r"[^\w.-]+", "_", name.strip(), flags=re.UNICODE).strip("._")
+    if not filename:
+        raise CrawlerError("Output name must contain at least one letter or number")
+    if not filename.lower().endswith(".json"):
+        filename += ".json"
+    return Path(output_dir).expanduser() / filename
 
 
 def extract(page: Page) -> dict[str, Any]:
@@ -200,26 +245,48 @@ def extract(page: Page) -> dict[str, Any]:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Extract structured data from one public web page.")
     parser.add_argument("url")
-    parser.add_argument("-o", "--output", help="Write JSON to this file (default: stdout)")
+    destination = parser.add_mutually_exclusive_group()
+    destination.add_argument("-o", "--output", help="Write JSON to this exact file path")
+    destination.add_argument("-n", "--name", help="Name this study output; saves it as JSON in --output-dir")
+    parser.add_argument("--output-dir", default="outputs", help="Folder for --name outputs (default: outputs)")
+    parser.add_argument("--overwrite", action="store_true", help="Allow replacing an existing named output")
     parser.add_argument("--playwright", action="store_true", help="Render JavaScript before extraction")
+    parser.add_argument("--headed", action="store_true", help="Show the Playwright browser window")
+    parser.add_argument(
+        "--wait-for-user",
+        action="store_true",
+        help="Wait for Enter after you manually complete browser verification",
+    )
     parser.add_argument("--timeout", type=float, default=15, help="Timeout in seconds (default: 15)")
     parser.add_argument("--max-bytes", type=int, default=5_000_000, help="Maximum HTML size")
     parser.add_argument("--delay", type=float, default=0, help="Wait before fetching; useful in batch scripts")
     args = parser.parse_args()
     if args.timeout <= 0 or args.max_bytes <= 0 or args.delay < 0:
         parser.error("timeout and max-bytes must be positive; delay cannot be negative")
+    if (args.headed or args.wait_for_user) and not args.playwright:
+        parser.error("--headed and --wait-for-user require --playwright")
+    if args.wait_for_user and not args.headed:
+        parser.error("--wait-for-user requires --headed so you can see the verification page")
 
     try:
         time.sleep(args.delay)
-        page = (fetch_playwright if args.playwright else fetch_requests)(args.url, args.timeout, args.max_bytes)
+        if args.playwright:
+            page = fetch_playwright(args.url, args.timeout, args.max_bytes, args.headed, args.wait_for_user)
+        else:
+            page = fetch_requests(args.url, args.timeout, args.max_bytes)
         result = json.dumps(extract(page), ensure_ascii=False, indent=2)
-        if args.output:
-            with open(args.output, "w", encoding="utf-8") as handle:
+        output_path = named_output_path(args.name, args.output_dir) if args.name else Path(args.output).expanduser() if args.output else None
+        if output_path:
+            if args.name and output_path.exists() and not args.overwrite:
+                raise CrawlerError(f"Output already exists: {output_path} (use --overwrite to replace it)")
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            with output_path.open("w", encoding="utf-8") as handle:
                 handle.write(result + "\n")
+            print(f"saved: {output_path.resolve()}")
         else:
             print(result)
         return 0
-    except CrawlerError as exc:
+    except (CrawlerError, OSError, requests.RequestException) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
 

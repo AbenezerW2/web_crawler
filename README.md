@@ -26,6 +26,22 @@ Save it to a file:
 python crawler.py "https://example.com" --output page.json
 ```
 
+For classwork, give each extraction a descriptive name. The crawler creates the
+`outputs` folder when needed, makes the filename safe, and prints the full saved
+location:
+
+```bash
+python crawler.py "https://example.com/chapter-7" --name "PHL 218 - Chapter 7"
+```
+
+This produces `outputs/PHL_218_-_Chapter_7.json`. Choose another folder with
+`--output-dir`, and use `--overwrite` only when you intentionally want to replace
+an existing named extraction:
+
+```bash
+python crawler.py "https://example.com/chapter-7" --name "PHL 218 - Chapter 7" --output-dir study-data --overwrite
+```
+
 Useful controls:
 
 ```bash
@@ -43,6 +59,18 @@ python crawler.py "https://example.com" --playwright --output page.json
 ```
 
 Playwright is slower and consumes more resources. Its browser may load third-party subresources, so only use it with sites you trust. It does not bypass CAPTCHAs, paywalls, or access controls.
+
+If a site requires a human-verification step, open a visible browser and ask the
+crawler to wait. Complete the check yourself, return to the terminal, and press
+Enter only after the real page has loaded:
+
+```bash
+python crawler.py "https://example.com/chapter" --playwright --headed --wait-for-user --name "Course - Chapter"
+```
+
+The crawler detects common CAPTCHA and human-verification pages and refuses to
+save them as successful study outputs. Manual mode does not bypass security; it
+only lets the authorized user complete the site's normal check.
 
 ## Responsible-use limits
 

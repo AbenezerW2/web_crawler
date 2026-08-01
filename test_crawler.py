@@ -1,7 +1,15 @@
 import unittest
 from unittest.mock import Mock, patch
 
-from crawler import CrawlerError, Page, extract, robots_allows, validate_public_url
+from crawler import (
+    CrawlerError,
+    Page,
+    extract,
+    looks_like_verification_page,
+    named_output_path,
+    robots_allows,
+    validate_public_url,
+)
 
 
 class ExtractTests(unittest.TestCase):
@@ -34,6 +42,38 @@ class ExtractTests(unittest.TestCase):
     def test_robots_403_remains_blocked(self, mock_get, _mock_validate):
         mock_get.return_value = Mock(status_code=403)
         self.assertFalse(robots_allows("https://example.com/page", 5))
+
+    def test_builds_safe_named_output_path(self):
+        path = named_output_path("PHL 218 / Chapter 7", "outputs")
+        self.assertEqual(str(path), "outputs/PHL_218_Chapter_7.json")
+
+    def test_named_output_accepts_json_extension(self):
+        path = named_output_path("week-1.json", "study")
+        self.assertEqual(str(path), "study/week-1.json")
+
+    def test_rejects_empty_named_output(self):
+        with self.assertRaises(CrawlerError):
+            named_output_path("...", "outputs")
+
+    def test_detects_human_verification_page(self):
+        page = Page(
+            "https://example.com",
+            "https://example.com",
+            405,
+            "text/html",
+            "<title>Human Verification</title><h1>Let's confirm you are human</h1>",
+        )
+        self.assertTrue(looks_like_verification_page(page))
+
+    def test_accepts_normal_rendered_page(self):
+        page = Page(
+            "https://example.com",
+            "https://example.com",
+            200,
+            "text/html",
+            "<title>Chapter 7</title><h1>Ethics and care</h1>",
+        )
+        self.assertFalse(looks_like_verification_page(page))
 
 
 if __name__ == "__main__":
