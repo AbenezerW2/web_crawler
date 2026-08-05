@@ -1,7 +1,18 @@
 import unittest
 from unittest.mock import Mock, patch
 
-from crawler import CrawlerError, Page, extract, robots_allows, validate_public_url
+from crawler import (
+    CrawlerError,
+    Page,
+    chapter_urls,
+    extract,
+    looks_like_verification_page,
+    named_output_path,
+    render_markdown,
+    render_text,
+    robots_allows,
+    validate_public_url,
+)
 
 
 class ExtractTests(unittest.TestCase):
@@ -34,6 +45,90 @@ class ExtractTests(unittest.TestCase):
     def test_robots_403_remains_blocked(self, mock_get, _mock_validate):
         mock_get.return_value = Mock(status_code=403)
         self.assertFalse(robots_allows("https://example.com/page", 5))
+
+    def test_builds_safe_named_output_path(self):
+        path = named_output_path("PHL 218 / Chapter 7", "outputs")
+        self.assertEqual(str(path), "outputs/PHL_218_Chapter_7.json")
+
+    def test_named_output_accepts_json_extension(self):
+        path = named_output_path("week-1.json", "study")
+        self.assertEqual(str(path), "study/week-1.json")
+
+    def test_named_output_uses_format_extension(self):
+        self.assertEqual(
+            str(named_output_path("PHL 218 - Chapter 7.json", "outputs", "markdown")),
+            "outputs/PHL_218_-_Chapter_7.md",
+        )
+
+    def test_rejects_empty_named_output(self):
+        with self.assertRaises(CrawlerError):
+            named_output_path("...", "outputs")
+
+    def test_detects_human_verification_page(self):
+        page = Page(
+            "https://example.com",
+            "https://example.com",
+            405,
+            "text/html",
+            "<title>Human Verification</title><h1>Let's confirm you are human</h1>",
+        )
+        self.assertTrue(looks_like_verification_page(page))
+
+    def test_accepts_normal_rendered_page(self):
+        page = Page(
+            "https://example.com",
+            "https://example.com",
+            200,
+            "text/html",
+            "<title>Chapter 7</title><h1>Ethics and care</h1>",
+        )
+        self.assertFalse(looks_like_verification_page(page))
+
+    def test_accepts_real_page_after_initial_405(self):
+        page = Page(
+            "https://example.com",
+            "https://example.com/chapter",
+            405,
+            "text/html (rendered)",
+            "<title>Chapter 7</title><h1>Ethics and care</h1><p>Study content</p>",
+        )
+        self.assertFalse(looks_like_verification_page(page))
+
+    def test_renders_study_formats(self):
+        data = {
+            "title": "Chapter 7",
+            "final_url": "https://example.com/ch7",
+            "content_blocks": [
+                {"type": "heading", "level": 2, "text": "Key Terms"},
+                {"type": "paragraph", "text": "A useful definition."},
+                {"type": "list_item", "text": "First consideration"},
+            ],
+        }
+        markdown = render_markdown(data)
+        text = render_text(data)
+        self.assertIn("### Key Terms", markdown)
+        self.assertIn("- First consideration", markdown)
+        self.assertIn("KEY TERMS", text)
+        self.assertIn("A useful definition.", text)
+
+    def test_generates_book_chapter_urls(self):
+        urls = chapter_urls("https://books.example/10/book/", 1, 3)
+        self.assertEqual(
+            urls,
+            [
+                "https://books.example/10/book/ch1.xhtml",
+                "https://books.example/10/book/ch2.xhtml",
+                "https://books.example/10/book/ch3.xhtml",
+            ],
+        )
+
+    def test_chapter_urls_accepts_contents_page(self):
+        urls = chapter_urls("https://books.example/10/book/contents.xhtml#top", 2, 2)
+        self.assertEqual(urls, ["https://books.example/10/book/ch2.xhtml"])
+
+    def test_rejects_invalid_chapter_range(self):
+        with self.assertRaises(CrawlerError):
+            chapter_urls("https://books.example/book/", 5, 2)
 
 
 if __name__ == "__main__":
