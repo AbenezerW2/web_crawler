@@ -89,24 +89,30 @@ only lets the authorized user complete the site's normal check.
 ## Extract a whole book by chapter
 
 For books whose pages follow `ch1.xhtml`, `ch2.xhtml`, and so on, batch mode
-reuses one Playwright browser session and saves every chapter separately. This
-example extracts Chapters 1–12 as Markdown:
+reuses one Playwright browser session and saves every chapter separately.
+Instead of running the crawler manually for every chapter, use this recommended
+command template:
 
 ```bash
-python crawler.py "https://books.openbookpublishers.com/10.11647/obp.0125/" \
-  --playwright --headed --wait-for-user \
-  --batch-chapters 12 \
-  --name "Ethics for A-Level - Chapter" \
+python crawler.py \
+  "BOOK_URL" \
+  --playwright \
+  --headed \
+  --wait-for-user \
+  --start-chapter 5 \
+  --batch-chapters 8 \
+  --name "Book Name - Chapter" \
   --format markdown \
-  --output-dir outputs/ethics-for-a-level \
+  --output-dir outputs/book-name \
   --delay 1
 ```
 
-Complete verification once on the first chapter, wait for the real chapter to
-appear, then return to the terminal and press Enter. Use `--start-chapter 3`,
-for example, to resume at Chapter 3. Existing files are protected unless you
-add `--overwrite`. Batch mode intentionally targets chapter URLs, not `#`
-fragments, because fragments are locations inside the same downloaded page.
+Replace `BOOK_URL`, the book name, chapter range, and output folder with the
+values for your book. The example extracts Chapters 5–8. Complete verification
+once on the first chapter, wait for the real chapter to appear, then return to
+the terminal and press Enter. Existing files are protected unless you add
+`--overwrite`. Batch mode intentionally targets chapter URLs, not `#` fragments,
+because fragments are locations inside the same downloaded page.
 
 ## Responsible-use limits
 
