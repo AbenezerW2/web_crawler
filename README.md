@@ -6,9 +6,10 @@ the command-line interface for scripts and advanced control.
 
 ## Desktop app
 
-The local desktop app supports whole books and individual pages. It provides a
-visible verification handoff, chapter progress, live activity logs, cancellation,
-and a shortcut to the output folder. Extraction stays on your computer.
+The local React desktop app has dedicated **Web page** and **Whole book**
+workflows, responsive controls, light/dark/system themes, a visible verification
+handoff, chapter progress, live activity logs, cancellation, and a shortcut to
+the output folder. Extraction stays on your computer.
 
 Install the app and browser dependencies:
 
@@ -19,11 +20,23 @@ python -m pip install -r requirements-app.txt
 playwright install chromium
 ```
 
-Launch it:
+Build the React interface (Node.js 20 or newer is recommended):
+
+```bash
+cd frontend
+npm install
+npm run build
+cd ..
+```
+
+Launch the desktop app:
 
 ```bash
 python app.py
 ```
+
+For frontend development, run `npm run dev` in `frontend`, then launch
+`python app.py --dev` in a second terminal.
 
 For a whole book, enter its base URL and chapter range, then select **Start
 extraction**. If the site shows a normal human-verification page, complete it in

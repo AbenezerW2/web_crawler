@@ -3,3 +3,5 @@ __pycache__/
 .venv/
 page.json
 .DS_Store
+frontend/node_modules/
+frontend/dist/
