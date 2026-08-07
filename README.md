@@ -1,8 +1,36 @@
-# Simple web page extractor
+# Book Extractor
 
-This command accepts one public URL and returns JSON containing the page title, description, headings, links, images, tables, and readable text. It uses `requests` and Beautiful Soup by default and can optionally render JavaScript with Playwright.
+Book Extractor turns public web pages and chapter-based online books into clean
+Markdown, JSON, or text. Use the desktop app for a guided workflow or keep using
+the command-line interface for scripts and advanced control.
 
-## Setup
+## Desktop app
+
+The local desktop app supports whole books and individual pages. It provides a
+visible verification handoff, chapter progress, live activity logs, cancellation,
+and a shortcut to the output folder. Extraction stays on your computer.
+
+Install the app and browser dependencies:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate              # Windows: .venv\Scripts\activate
+python -m pip install -r requirements-app.txt
+playwright install chromium
+```
+
+Launch it:
+
+```bash
+python app.py
+```
+
+For a whole book, enter its base URL and chapter range, then select **Start
+extraction**. If the site shows a normal human-verification page, complete it in
+the opened browser and select **Verification complete** in the app. The app does
+not bypass access controls, CAPTCHAs, logins, or paywalls.
+
+## Command-line setup
 
 Python 3.10 or newer is recommended.
 
@@ -12,7 +40,7 @@ source .venv/bin/activate              # Windows: .venv\Scripts\activate
 python -m pip install -r requirements.txt
 ```
 
-## Usage
+## Command-line usage
 
 Print JSON:
 
